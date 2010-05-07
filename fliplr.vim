@@ -12,9 +12,13 @@
 "
 "   This mapping may help you.
 "       noremap \f :FlipLR <C-R>=g:FlipLR_detectPivot()<CR>
+"   This mapping highlights an operator. (add to your gvimrc)
+"       noremap \f :call g:FlipLR_startHighlightingPivot()<CR><ESC>:FlipLR <C-R>=g:FlipLR_detectPivot()<CR>
 
 command! -range -nargs=1 FlipLR call <SID>FlipLR_execute(<SID>FlipLR__getSelectedText(), <f-args>)
 
+highlight FlipLREntire term=underline gui=underline
+highlight FlipLRPivot term=reverse,bold gui=reverse,bold
 
 let s:REGEXP_SPACE = '[ \t\e\r\b\n]'
 
@@ -75,34 +79,103 @@ function! s:FlipLR_execute(entire, ...) " only a:000[0] is used
 
     " replace
 
+    let old_t = @t
+    let @t = new_entire
     normal gv
-    let old_dq = @"
-    let @" = new_entire
-    normal p
-    let @" = old_dq
+    normal "tp
+    let @t = old_t
+
+    "echom 'stridx:' . string(stridx(sp_r2, "\n"))
+    "echom 'strlen:' . string(strlen(sp_r2) - 1)
+    "if stridx(sp_r2, "\n") == strlen(sp_r2) - 1
+    "    normal kJ
+    "endif
+endfunction
+
+function! g:FlipLR_startHighlightingPivot()
+    let pivot = s:FlipLR__substituteSpecialChars(g:FlipLR_detectPivot())
+
+    normal gv
+    let old_t = @t
+    normal "ty
+    let entire = s:FlipLR__substituteSpecialChars(@t)
+    let @t = old_t
+
+    syntax clear FlipLREntire
+    execute 'syntax match FlipLREntire /\V' . entire . '/ containedin=ALL'
+    " highlighting all pivots is annoying
+    syntax clear FlipLRPivot
+    execute 'syntax match FlipLRPivot /\%'.line('.').'l\V' . pivot . '/ containedin=ALL'
+
+    let g:FlipLR__updatetime = &updatetime
+    echom g:FlipLR__updatetime
+    let &updatetime = 1
+    augroup FlipLR
+        autocmd!
+        autocmd FlipLR CursorHold *
+                    \ let &updatetime = g:FlipLR__updatetime | syntax clear FlipLREntire | syntax clear FlipLRPivot | autocmd! FlipLR
+    augroup END
 endfunction
 
 function! g:FlipLR_detectPivot()
     normal gv
-    let old_dq = @"
-    normal y
-    let str = @"
-    let @" = old_dq
+    let old_t = @t
+    normal "ty
+    let str = @t
+    let @t = old_t
 
-    let elems = split(str, s:REGEXP_SPACE)
-    if len(elems) < 3
-        let elems = split(str, s:REGEXP_SPACE . '\|\<\|\>')
+    let elems = split(str, s:REGEXP_SPACE . '\|\<\|\>')
+    let c = len(elems)
+
+    " init
+    let ranks = map(copy(elems), '0')
+
+    " gain centers' ranks
+    if c % 2 == 1
+        let ranks[c / 2] += 1
+    else
+        let ranks[c / 2 - 1] += 1
+        let ranks[c / 2] += 1
     endif
-    return elems[len(elems)/2]
+
+    " gain non-word parts' ranks
+    " gain equal sign's rank
+    let i = 0
+    while i < c
+        if match(elems[i], '^\W\+$') != -1
+            let ranks[i] += 1
+            if stridx(elems[i], '=') != -1
+                let ranks[i] += 2
+            endif
+        endif
+        let i += 1
+    endwhile
+
+    let max_rank = -1
+    let max_idx = 0
+    let i = 0
+    while i < c
+        if max_rank < ranks[i]
+            let max_rank = ranks[i]
+            let max_idx = i
+        endif
+        let i += 1
+    endwhile
+
+    "echom join(elems, ', ')
+    "echom join(ranks, ', ')
+    let pivot = elems[max_idx]
+
+    return pivot
 endfunction
 
 function! s:FlipLR__getSelectedText()
-    let old_a = @a
+    let old_t = @t
 
-    normal gv"ay
-    let result = @a
+    normal gv"ty
+    let result = @t
 
-    let @a = old_a
+    let @t = old_t
 
     return result
 endfunction
@@ -119,6 +192,6 @@ endfunction
 " a != b
 " a |= b
 " a ~= b
-" a \= b
+" a + c \= b
 
 " vim: set et ft=vim sts=4 sw=4 ts=4 tw=0 : 
